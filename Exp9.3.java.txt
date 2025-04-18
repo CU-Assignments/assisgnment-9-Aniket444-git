@@ -1,0 +1,206 @@
+CREATE TABLE account (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    name VARCHAR(100),
+    balance DOUBLE
+);
+
+CREATE TABLE bank_transaction (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    from_account INT,
+    to_account INT,
+    amount DOUBLE,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+package com.example.model;
+
+import javax.persistence.*;
+
+@Entity
+@Table(name = "account")
+public class Account {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private int id;
+
+    private String name;
+    private double balance;
+
+    // Getters, Setters
+    public int getId() { return id; }
+    public String getName() { return name; }
+    public double getBalance() { return balance; }
+
+    public void setName(String name) { this.name = name; }
+    public void setBalance(double balance) { this.balance = balance; }
+}
+package com.example.model;
+
+import javax.persistence.*;
+import java.sql.Timestamp;
+
+@Entity
+@Table(name = "bank_transaction")
+public class Transaction {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private int id;
+
+    private int fromAccount;
+    private int toAccount;
+    private double amount;
+
+    private Timestamp timestamp;
+
+    // Getters, Setters
+    public int getId() { return id; }
+    public int getFromAccount() { return fromAccount; }
+    public int getToAccount() { return toAccount; }
+    public double getAmount() { return amount; }
+    public Timestamp getTimestamp() { return timestamp; }
+
+    public void setFromAccount(int fromAccount) { this.fromAccount = fromAccount; }
+    public void setToAccount(int toAccount) { this.toAccount = toAccount; }
+    public void setAmount(double amount) { this.amount = amount; }
+    public void setTimestamp(Timestamp timestamp) { this.timestamp = timestamp; }
+}
+package com.example.service;
+
+import com.example.model.Account;
+import com.example.model.Transaction;
+import org.hibernate.SessionFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.sql.Timestamp;
+
+@Service
+public class BankService {
+
+    @Autowired
+    private SessionFactory sessionFactory;
+
+    @Transactional
+    public void transferMoney(int fromId, int toId, double amount) {
+        Account from = sessionFactory.getCurrentSession().get(Account.class, fromId);
+        Account to = sessionFactory.getCurrentSession().get(Account.class, toId);
+
+        if (from == null || to == null) throw new RuntimeException("Account not found");
+        if (from.getBalance() < amount) throw new RuntimeException("Insufficient balance");
+
+        from.setBalance(from.getBalance() - amount);
+        to.setBalance(to.getBalance() + amount);
+
+        sessionFactory.getCurrentSession().update(from);
+        sessionFactory.getCurrentSession().update(to);
+
+        Transaction tx = new Transaction();
+        tx.setFromAccount(fromId);
+        tx.setToAccount(toId);
+        tx.setAmount(amount);
+        tx.setTimestamp(new Timestamp(System.currentTimeMillis()));
+
+        sessionFactory.getCurrentSession().save(tx);
+    }
+}
+package com.example.config;
+
+import java.util.Properties;
+
+import javax.sql.DataSource;
+
+import com.example.model.Account;
+import com.example.model.Transaction;
+
+import org.hibernate.SessionFactory;
+import org.springframework.context.annotation.*;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.orm.hibernate5.LocalSessionFactoryBean;
+import org.springframework.transaction.annotation.EnableTransactionManagement;
+
+@Configuration
+@ComponentScan(basePackages = "com.example")
+@EnableTransactionManagement
+public class AppConfig {
+
+    @Bean
+    public DataSource dataSource() {
+        DriverManagerDataSource ds = new DriverManagerDataSource();
+        ds.setDriverClassName("com.mysql.cj.jdbc.Driver");
+        ds.setUrl("jdbc:mysql://localhost:3306/yourdb");
+        ds.setUsername("root");
+        ds.setPassword("password");
+        return ds;
+    }
+
+    @Bean
+    public LocalSessionFactoryBean sessionFactory() {
+        LocalSessionFactoryBean lsf = new LocalSessionFactoryBean();
+        lsf.setDataSource(dataSource());
+        lsf.setPackagesToScan("com.example.model");
+        Properties props = new Properties();
+        props.setProperty("hibernate.dialect", "org.hibernate.dialect.MySQL8Dialect");
+        props.setProperty("hibernate.hbm2ddl.auto", "update");
+        props.setProperty("hibernate.show_sql", "true");
+        lsf.setHibernateProperties(props);
+        return lsf;
+    }
+
+    @Bean
+    public org.springframework.orm.hibernate5.HibernateTransactionManager transactionManager(SessionFactory sessionFactory) {
+        return new org.springframework.orm.hibernate5.HibernateTransactionManager(sessionFactory);
+    }
+}
+package com.example;
+
+import com.example.config.AppConfig;
+import com.example.service.BankService;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+
+public class MainApp {
+    public static void main(String[] args) {
+        AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext(AppConfig.class);
+        BankService bankService = context.getBean(BankService.class);
+
+        try {
+            System.out.println("==== Successful Transfer ====");
+            bankService.transferMoney(1, 2, 100); // Should work
+        } catch (Exception e) {
+            System.out.println("Error in transaction: " + e.getMessage());
+        }
+
+        try {
+            System.out.println("\n==== Failed Transfer (Insufficient Balance) ====");
+            bankService.transferMoney(1, 2, 100000); // Should trigger rollback
+        } catch (Exception e) {
+            System.out.println("Rollback triggered: " + e.getMessage());
+        }
+
+        context.close();
+    }
+}
+<dependencies>
+    <dependency>
+        <groupId>org.springframework</groupId>
+        <artifactId>spring-context</artifactId>
+        <version>5.3.31</version>
+    </dependency>
+
+    <dependency>
+        <groupId>org.springframework</groupId>
+        <artifactId>spring-orm</artifactId>
+        <version>5.3.31</version>
+    </dependency>
+
+    <dependency>
+        <groupId>org.hibernate</groupId>
+        <artifactId>hibernate-core</artifactId>
+        <version>5.6.15.Final</version>
+    </dependency>
+
+    <dependency>
+        <groupId>mysql</groupId>
+        <artifactId>mysql-connector-java</artifactId>
+        <version>8.0.33</version>
+    </dependency>
+</dependencies>
